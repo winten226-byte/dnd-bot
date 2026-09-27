@@ -1,9 +1,12 @@
 import json
 import logging
+import os
 import sqlite3
+import threading
 from datetime import datetime, time, timezone
 
 import httpx
+from flask import Flask
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -20,10 +23,10 @@ from telegram.ext import (
 )
 
 # ==================== НАСТРОЙКИ ====================
-import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не задан в переменных окружения")
+
 DB_PATH = "dnd_bot.db"
 
 SLOTS = {
@@ -89,7 +92,6 @@ def get_all_statuses(chat_id):
 
 
 def get_all_chat_ids():
-    """Все chat_id, где есть записи — для уведомлений."""
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("SELECT DISTINCT chat_id FROM user_status").fetchall()
     conn.close()
@@ -97,7 +99,6 @@ def get_all_chat_ids():
 
 
 def clear_all_statuses():
-    """Удалить все записи из user_status."""
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DELETE FROM user_status")
     conn.commit()
@@ -237,7 +238,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     chat_id = query.message.chat_id
 
-    # === Меню выбора дней ===
     if data == "menu_days":
         await safe_answer(query)
         await refresh_ephemeral(
@@ -248,7 +248,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # === Назад ===
     if data == "menu_back":
         await safe_answer(query)
         await refresh_ephemeral(
@@ -258,7 +257,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # === Публичный просмотр всех записей ===
     if data == "menu_all":
         await safe_answer(query)
 
@@ -300,7 +298,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Не удалось отправить публичный список: {e}")
         return
 
-    # === Установка статуса ===
     if data.startswith("set_"):
         slot_key = data[4:]
         slot_name = SLOTS.get(slot_key, slot_key)
@@ -321,10 +318,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== ЕЖЕНЕДЕЛЬНЫЙ СБРОС ====================
 async def weekly_reset(context: ContextTypes.DEFAULT_TYPE):
-    """
-    Задача: очистка всех записей раз в неделю.
-    Опционально уведомляет все группы, где были записи.
-    """
     chat_ids = get_all_chat_ids()
     clear_all_statuses()
     logger.info(f"🔄 Еженедельный сброс записей. Уведомляю {len(chat_ids)} чат(ов).")
@@ -349,6 +342,20 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Исключение:", exc_info=context.error)
 
 
+# ==================== FLASK (для Render Web Service) ====================
+flask_app = Flask(__name__)
+
+
+@flask_app.route("/")
+def health():
+    return "OK", 200
+
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
+
+
 # ==================== ЗАПУСК ====================
 def main():
     init_db()
@@ -359,18 +366,20 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_error_handler(error_handler)
 
-    # Планируем еженедельный сброс — каждый понедельник в 00:00 UTC
     if app.job_queue:
         app.job_queue.run_daily(
             weekly_reset,
             time=time(hour=0, minute=0, tzinfo=timezone.utc),
-            days=(0,),  # 0 = понедельник
+            days=(0,),
             name="weekly_reset",
         )
         logger.info("⏰ Запланирован еженедельный сброс (Пн 00:00 UTC)")
     else:
-        logger.warning("⚠️ JobQueue недоступен. Установи APScheduler: "
-                       "pip install \"python-telegram-bot[job-queue]\"")
+        logger.warning("⚠️ JobQueue недоступен.")
+
+    # Запускаем Flask в отдельном потоке — Render увидит HTTP-порт
+    threading.Thread(target=run_flask, daemon=True).start()
+    logger.info("🌐 Flask health-сервер запущен")
 
     logger.info("Бот запущен...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
