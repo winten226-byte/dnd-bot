@@ -3,6 +3,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time as time_module
 from datetime import datetime, time, timezone
 
 import httpx
@@ -37,6 +38,7 @@ SLOTS = {
 }
 
 POPULAR_THRESHOLD = 6
+EPHEMERAL_TTL = 300  # 5 минут — максимальный возраст сообщения для редактирования
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -192,9 +194,16 @@ async def safe_answer(query, text: str = None, show_alert: bool = False):
 
 async def refresh_ephemeral(context, chat_id, user_id, text,
                             reply_markup=None, parse_mode="HTML"):
+    """
+    1. Если сообщения нет — отправляем новое.
+    2. Если есть, но старше EPHEMERAL_TTL — отправляем новое.
+    3. Если есть и свежее — пробуем редактировать; при неудаче — отправляем новое.
+    """
     old_id = context.user_data.get("ephemeral_menu_id")
+    old_ts = context.user_data.get("ephemeral_menu_ts", 0)
+    age = time_module.time() - old_ts if old_ts else None
 
-    if old_id:
+    if old_id and age is not None and age < EPHEMERAL_TTL:
         data = await edit_ephemeral(
             chat_id, user_id, old_id, text,
             reply_markup=reply_markup, parse_mode=parse_mode,
@@ -203,6 +212,9 @@ async def refresh_ephemeral(context, chat_id, user_id, text,
             return
         logger.warning(f"edit не удался, отправляем новое: {data.get('description')}")
         context.user_data.pop("ephemeral_menu_id", None)
+        context.user_data.pop("ephemeral_menu_ts", None)
+    elif old_id and age is not None and age >= EPHEMERAL_TTL:
+        logger.info(f"Старое эфемерное сообщение устарело ({int(age)} сек) — отправляю новое")
 
     result = await send_ephemeral(
         chat_id, user_id, text,
@@ -211,6 +223,7 @@ async def refresh_ephemeral(context, chat_id, user_id, text,
     if result:
         new_id = result.get("ephemeral_message_id") or result.get("message_id")
         context.user_data["ephemeral_menu_id"] = new_id
+        context.user_data["ephemeral_menu_ts"] = time_module.time()
 
 
 # ==================== ХЭНДЛЕРЫ ====================
@@ -342,7 +355,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Исключение:", exc_info=context.error)
 
 
-# ==================== FLASK (для Render Web Service) ====================
+# ==================== FLASK ====================
 flask_app = Flask(__name__)
 
 
@@ -377,7 +390,6 @@ def main():
     else:
         logger.warning("⚠️ JobQueue недоступен.")
 
-    # Запускаем Flask в отдельном потоке — Render увидит HTTP-порт
     threading.Thread(target=run_flask, daemon=True).start()
     logger.info("🌐 Flask health-сервер запущен")
 
