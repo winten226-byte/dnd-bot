@@ -29,6 +29,19 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не задан в переменных окружения")
 
 DB_PATH = "dnd_bot.db"
+# ==================== РАССЫЛКА ====================
+# ID чата, куда отправлять ежедневное напоминание
+DAILY_CHAT_ID = int(os.environ.get("DAILY_CHAT_ID", "0"))
+
+# Текст напоминания (можно вынести в env, но проще прямо тут)
+DAILY_REMINDER_TEXT = (
+    "Привет Иван! @Domoviu\n"
+    "Решил наконец разобраться с чеками и задолженностями за тебя!!!\n"
+    "Илья - 13.937,00 грн\n"
+    "Богдан - 539,00 грн\n"
+    "Егор - 632,21 грн\n\n"
+    "Карта Ивана: 5168745164683382"
+)
 
 SLOTS = {
     "fri_sun": "Пт–Вс",
@@ -349,7 +362,20 @@ async def weekly_reset(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Не удалось уведомить {cid}: {e}")
 
+# ==================== ЕЖЕДНЕВНОЕ НАПОМИНАНИЕ ====================
+async def daily_reminder(context: ContextTypes.DEFAULT_TYPE):
+    if not DAILY_CHAT_ID:
+        logger.warning("DAILY_CHAT_ID не задан — ежедневное напоминание пропущено")
+        return
 
+    try:
+        await context.bot.send_message(
+            chat_id=DAILY_CHAT_ID,
+            text=DAILY_REMINDER_TEXT,
+        )
+        logger.info(f"✅ Ежедневное напоминание отправлено в чат {DAILY_CHAT_ID}")
+    except Exception as e:
+        logger.error(f"Не удалось отправить ежедневное напоминание: {e}")
 # ==================== ОБРАБОТКА ОШИБОК ====================
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Исключение:", exc_info=context.error)
@@ -387,6 +413,14 @@ def main():
             name="weekly_reset",
         )
         logger.info("⏰ Запланирован еженедельный сброс (Пн 00:00 UTC)")
+
+        # ← НОВОЕ: ежедневное напоминание в 18:00
+        app.job_queue.run_daily(
+            daily_reminder,
+            time=time(hour=18, minute=0, tzinfo=timezone.utc),
+            name="daily_reminder",
+        )
+        logger.info("⏰ Запланировано ежедневное напоминание (18:00 UTC)")
     else:
         logger.warning("⚠️ JobQueue недоступен.")
 
