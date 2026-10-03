@@ -5,6 +5,7 @@ import sqlite3
 import threading
 import time as time_module
 from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 from flask import Flask
@@ -29,6 +30,8 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не задан в переменных окружения")
 
 DB_PATH = "dnd_bot.db"
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
+DAILY_CHAT_ID = int(os.environ.get("DAILY_CHAT_ID", "0"))
 # ==================== РАССЫЛКА ====================
 # ID чата, куда отправлять ежедневное напоминание
 DAILY_CHAT_ID = int(os.environ.get("DAILY_CHAT_ID", "0"))
@@ -414,13 +417,12 @@ def main():
         )
         logger.info("⏰ Запланирован еженедельный сброс (Пн 00:00 UTC)")
 
-        # ← НОВОЕ: ежедневное напоминание в 18:00
         app.job_queue.run_daily(
             daily_reminder,
-            time=time(hour=18, minute=0, tzinfo=timezone.utc),
+            time=time(hour=18, minute=5, tzinfo=KYIV_TZ),
             name="daily_reminder",
         )
-        logger.info("⏰ Запланировано ежедневное напоминание (18:00 UTC)")
+        logger.info("⏰ Напоминание в 18:00 Киев")
     else:
         logger.warning("⚠️ JobQueue недоступен.")
 
