@@ -38,12 +38,20 @@ DAILY_CHAT_ID = int(os.environ.get("DAILY_CHAT_ID", "0"))
 
 # Текст напоминания (можно вынести в env, но проще прямо тут)
 DAILY_REMINDER_TEXT = (
-    "Привет Иван! @Domoviu\n"
+    "<b>Привет Иван! @Domoviu</b>\n"
     "Решил наконец разобраться с чеками и задолженностями за тебя!!!\n"
-    "Илья - 13.937,00 грн\n"
-    "Богдан - 539,00 грн\n"
-    "Егор - 632,21 грн\n\n"
-    "Карта Ивана: 5168745164683382"
+    "<b>Илья - 14.087,00 грн</b>\n"
+    "<b>Богдан - 539,00 грн</b>\n"
+    "<b>Егор - 632,21 грн</b>\n\n"
+    "Карта: 4874070014277998\n"
+    "<i>Мне 10% за работу, 90% тебе.</i>\n\n"
+    "<blockquote>"
+    "РЕКЛАМА:\n"
+    "НАДОЕЛИ НИЗКИЕ ПРОЦЕНТЫ БАНКОВ? НАДОЕЛИ НЕНАДЕЖНЫЕ КОНТРАКТЫ БАНКОВ?\n"
+    "ВЛОЖИТЕСЬ В <a href='https://docs.google.com/document/d/1tTvNynhfcd4kaTich7da7REBGOJgoc9D/edit?usp=drivesdk&ouid=107515927293009479343&rtpof=true&sd=true'>Славика🥰</a>\n"
+    "8% ежемесячно от вашего вложения, пишите! Вы застрахованы от неудач на стороне заёмщика.\n"
+    "И помните! Ваше богатство начинается с ваших вложений."
+    "</blockquote>"
 )
 
 SLOTS = {
@@ -375,6 +383,8 @@ async def daily_reminder(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(
             chat_id=DAILY_CHAT_ID,
             text=DAILY_REMINDER_TEXT,
+            parse_mode="HTML",               # <--- Добавлено для форматирования
+            disable_web_page_preview=True    # <--- Добавлено, чтобы ссылка не разворачивалась в большое окно
         )
         logger.info(f"✅ Ежедневное напоминание отправлено в чат {DAILY_CHAT_ID}")
     except Exception as e:
@@ -409,20 +419,22 @@ def main():
     app.add_error_handler(error_handler)
 
     if app.job_queue:
+        # Еженедельный сброс: Понедельник 00:00 по Киеву
         app.job_queue.run_daily(
             weekly_reset,
-            time=time(hour=0, minute=0, tzinfo=timezone.utc),
-            days=(0,),
+            time=time(hour=0, minute=0, tzinfo=KYIV_TZ), # Изменено на KYIV_TZ
+            days=(0,), # 0 = Понедельник
             name="weekly_reset",
         )
-        logger.info("⏰ Запланирован еженедельный сброс (Пн 00:00 UTC)")
+        logger.info("⏰ Запланирован еженедельный сброс (Пн 00:00 Киев)")
 
+        # Ежедневное напоминание: 17:00 по Киеву
         app.job_queue.run_daily(
             daily_reminder,
-            time=time(hour=18, minute=5, tzinfo=KYIV_TZ),
+            time=time(hour=17, minute=0, tzinfo=KYIV_TZ), # Изменено на 17:00
             name="daily_reminder",
         )
-        logger.info("⏰ Напоминание в 18:00 Киев")
+        logger.info("⏰ Напоминание в 17:00 Киев")
     else:
         logger.warning("⚠️ JobQueue недоступен.")
 
